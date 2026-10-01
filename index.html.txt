@@ -1,0 +1,644 @@
+import React, { useState, useEffect } from 'react';
+import { initializeApp } from 'firebase/app';
+import { 
+  getAuth, 
+  signInAnonymously, 
+  signInWithCustomToken, 
+  onAuthStateChanged 
+} from 'firebase/auth';
+import { 
+  getFirestore, 
+  collection, 
+  onSnapshot, 
+  addDoc, 
+  deleteDoc, 
+  doc,
+  query
+} from 'firebase/firestore';
+import { 
+  BookOpen, 
+  Lock, 
+  User, 
+  CheckCircle, 
+  XCircle, 
+  Trash2, 
+  PlusCircle, 
+  LogOut,
+  ChevronRight,
+  Award
+} from 'lucide-react';
+
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+// Categories for the exams
+const CATEGORIES = [
+  'General',
+  'UGC NET Paper 1', 
+  'Sanskrit', 
+  'JVVNL Junior Accountant'
+];
+
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [currentView, setCurrentView] = useState('student_home'); // student_home, quiz, admin_login, admin_dashboard
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState(null);
+  const [notification, setNotification] = useState('');
+
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (error) {
+        console.error("Auth Error:", error);
+      }
+    };
+    initAuth();
+
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const showNotification = (msg) => {
+    setNotification(msg);
+    setTimeout(() => setNotification(''), 3000);
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-800">
+      {/* Navbar */}
+      <nav className="bg-indigo-600 text-white shadow-md">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between h-16 items-center">
+            <div 
+              className="flex items-center cursor-pointer space-x-2"
+              onClick={() => {
+                setCurrentView('student_home');
+                setSelectedCategory(null);
+              }}
+            >
+              <BookOpen size={28} />
+              <span className="font-bold text-xl tracking-wide">ExamPrep Pro</span>
+            </div>
+            
+            <div className="flex space-x-4">
+              <button 
+                onClick={() => {
+                  setCurrentView('student_home');
+                  setSelectedCategory(null);
+                }}
+                className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${currentView === 'student_home' || currentView === 'quiz' ? 'bg-indigo-700' : 'hover:bg-indigo-500'}`}
+              >
+                <div className="flex items-center space-x-1">
+                  <User size={18} />
+                  <span>Student</span>
+                </div>
+              </button>
+              
+              <button 
+                onClick={() => {
+                  if (isAdmin) {
+                    setCurrentView('admin_dashboard');
+                  } else {
+                    setCurrentView('admin_login');
+                  }
+                }}
+                className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${currentView.startsWith('admin') ? 'bg-indigo-700' : 'hover:bg-indigo-500'}`}
+              >
+                <div className="flex items-center space-x-1">
+                  <Lock size={18} />
+                  <span>Admin Panel</span>
+                </div>
+              </button>
+            </div>
+          </div>
+        </div>
+      </nav>
+
+      {/* Global Notification */}
+      {notification && (
+        <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 bg-gray-900 text-white px-6 py-3 rounded-full shadow-lg flex items-center space-x-2 animate-fade-in-down">
+          <CheckCircle size={20} className="text-green-400"/>
+          <span>{notification}</span>
+        </div>
+      )}
+
+      {/* Main Content Area */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {!user ? (
+          <div className="flex justify-center items-center h-64">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+          </div>
+        ) : (
+          <>
+            {currentView === 'student_home' && (
+              <StudentHome 
+                onSelectCategory={(cat) => {
+                  setSelectedCategory(cat);
+                  setCurrentView('quiz');
+                }} 
+              />
+            )}
+            
+            {currentView === 'quiz' && selectedCategory && (
+              <QuizView 
+                category={selectedCategory} 
+                user={user}
+                onGoBack={() => setCurrentView('student_home')}
+              />
+            )}
+            
+            {currentView === 'admin_login' && (
+              <AdminLogin 
+                onLogin={() => {
+                  setIsAdmin(true);
+                  setCurrentView('admin_dashboard');
+                  showNotification('Logged in securely as Admin');
+                }} 
+              />
+            )}
+            
+            {currentView === 'admin_dashboard' && isAdmin && (
+              <AdminDashboard 
+                user={user} 
+                onLogout={() => {
+                  setIsAdmin(false);
+                  setCurrentView('student_home');
+                  showNotification('Admin logged out');
+                }}
+                notify={showNotification}
+              />
+            )}
+          </>
+        )}
+      </main>
+    </div>
+  );
+}
+
+function StudentHome({ onSelectCategory }) {
+  return (
+    <div className="space-y-8 animate-fade-in">
+      <div className="text-center space-y-4">
+        <h1 className="text-4xl font-extrabold text-slate-900">Test Your Knowledge</h1>
+        <p className="text-lg text-slate-600 max-w-2xl mx-auto">
+          Select a category below to start practicing real exam questions. 
+          Improve your speed, accuracy, and confidence.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mt-8">
+        {CATEGORIES.map((cat, idx) => (
+          <div 
+            key={idx} 
+            onClick={() => onSelectCategory(cat)}
+            className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 hover:shadow-md hover:border-indigo-300 transition-all cursor-pointer group flex flex-col items-center text-center space-y-4"
+          >
+            <div className="w-16 h-16 bg-indigo-50 rounded-full flex items-center justify-center text-indigo-600 group-hover:scale-110 transition-transform duration-300">
+              <BookOpen size={32} />
+            </div>
+            <h3 className="text-xl font-bold text-slate-800">{cat}</h3>
+            <p className="text-sm text-slate-500">Practice questions & PYQs</p>
+            <div className="w-full pt-4 mt-auto">
+              <button className="w-full flex items-center justify-center space-x-2 bg-indigo-50 text-indigo-700 py-2 rounded-lg group-hover:bg-indigo-600 group-hover:text-white transition-colors font-medium">
+                <span>Start Test</span>
+                <ChevronRight size={18} />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function QuizView({ category, user, onGoBack }) {
+  const [questions, setQuestions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [answers, setAnswers] = useState({});
+  const [submitted, setSubmitted] = useState(false);
+  const [score, setScore] = useState(0);
+
+  useEffect(() => {
+    if (!user) return;
+    
+    // Fetch questions for this category
+    const qRef = collection(db, 'artifacts', appId, 'public', 'data', 'questions');
+    
+    // Note: To comply with RULE 2, we fetch all and filter in memory, 
+    // or use a very basic query if indexed. For safety in this environment, fetch all and filter.
+    const unsubscribe = onSnapshot(qRef, (snapshot) => {
+      const allQs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const categoryQs = allQs.filter(q => q.category === category);
+      setQuestions(categoryQs);
+      setLoading(false);
+    }, (error) => {
+      console.error("Error fetching questions:", error);
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [user, category]);
+
+  const handleSelect = (qId, optionIdx) => {
+    if (submitted) return;
+    setAnswers(prev => ({ ...prev, [qId]: optionIdx }));
+  };
+
+  const calculateScore = () => {
+    let currentScore = 0;
+    questions.forEach(q => {
+      if (answers[q.id] === q.correctAnswer) {
+        currentScore += 1;
+      }
+    });
+    setScore(currentScore);
+    setSubmitted(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  if (loading) {
+    return <div className="text-center py-20">Loading test...</div>;
+  }
+
+  if (questions.length === 0) {
+    return (
+      <div className="text-center py-20 space-y-6">
+        <h2 className="text-2xl font-bold text-slate-700">No questions available for {category} yet.</h2>
+        <p className="text-slate-500">Please check back later or ask an admin to add some.</p>
+        <button 
+          onClick={onGoBack}
+          className="bg-indigo-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-indigo-700 transition"
+        >
+          Go Back
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-4xl mx-auto space-y-8 pb-20 animate-fade-in">
+      <div className="flex items-center justify-between border-b border-slate-200 pb-4">
+        <div>
+          <h2 className="text-3xl font-bold text-slate-800">{category} Exam</h2>
+          <p className="text-slate-500 mt-1">Total Questions: {questions.length}</p>
+        </div>
+        {!submitted && (
+          <div className="bg-amber-100 text-amber-800 px-4 py-2 rounded-md font-semibold text-sm">
+            Draft Mode
+          </div>
+        )}
+      </div>
+
+      {submitted && (
+        <div className="bg-white rounded-xl shadow-lg border-t-4 border-green-500 p-8 text-center space-y-4">
+          <Award size={64} className="mx-auto text-green-500" />
+          <h2 className="text-3xl font-bold text-slate-800">Test Completed!</h2>
+          <p className="text-xl">
+            You scored <span className="font-bold text-green-600 text-2xl">{score}</span> out of <span className="font-bold text-2xl">{questions.length}</span>
+          </p>
+          <div className="pt-4">
+            <button 
+              onClick={onGoBack}
+              className="bg-slate-800 text-white px-8 py-3 rounded-lg font-medium hover:bg-slate-900 transition shadow-md"
+            >
+              Back to Home
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-8">
+        {questions.map((q, index) => (
+          <div key={q.id} className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 sm:p-8">
+            <h3 className="text-lg font-medium text-slate-900 mb-6">
+              <span className="text-indigo-600 font-bold mr-2">Q{index + 1}.</span> 
+              {q.question}
+            </h3>
+            
+            <div className="space-y-3">
+              {q.options.map((opt, optIdx) => {
+                const isSelected = answers[q.id] === optIdx;
+                const isCorrect = q.correctAnswer === optIdx;
+                let optionClass = "border border-slate-200 hover:bg-slate-50 cursor-pointer";
+                
+                if (submitted) {
+                  optionClass = "border border-slate-200 opacity-60 cursor-not-allowed";
+                  if (isCorrect) optionClass = "border-green-500 bg-green-50 font-medium text-green-800";
+                  else if (isSelected && !isCorrect) optionClass = "border-red-400 bg-red-50 text-red-800";
+                } else if (isSelected) {
+                  optionClass = "border-indigo-500 bg-indigo-50 ring-1 ring-indigo-500";
+                }
+
+                return (
+                  <div 
+                    key={optIdx} 
+                    onClick={() => handleSelect(q.id, optIdx)}
+                    className={`p-4 rounded-lg flex items-center justify-between transition-all ${optionClass}`}
+                  >
+                    <div className="flex items-center space-x-3">
+                      <div className={`w-6 h-6 rounded-full border flex items-center justify-center text-xs font-bold
+                        ${submitted && isCorrect ? 'bg-green-500 border-green-500 text-white' : 
+                          submitted && isSelected && !isCorrect ? 'bg-red-500 border-red-500 text-white' : 
+                          isSelected && !submitted ? 'bg-indigo-600 border-indigo-600 text-white' : 
+                          'border-slate-300 text-slate-500'}`}
+                      >
+                        {String.fromCharCode(65 + optIdx)}
+                      </div>
+                      <span className={submitted && isCorrect ? 'font-semibold' : ''}>{opt}</span>
+                    </div>
+                    
+                    {submitted && isCorrect && <CheckCircle className="text-green-500" size={20} />}
+                    {submitted && isSelected && !isCorrect && <XCircle className="text-red-500" size={20} />}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {!submitted && questions.length > 0 && (
+        <div className="flex justify-center pt-8 border-t border-slate-200 mt-8">
+          <button 
+            onClick={calculateScore}
+            className="bg-indigo-600 text-white px-10 py-4 rounded-xl font-bold text-lg hover:bg-indigo-700 hover:shadow-lg transition-all transform hover:-translate-y-1"
+          >
+            Submit Test
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AdminLogin({ onLogin }) {
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    // Simplified Mock Auth for Sandbox environment. 
+    // In production, this would use Firebase Auth Custom Claims or specific Admin Collections.
+    if (password === 'admin123') {
+      onLogin();
+    } else {
+      setError('Invalid admin password. Try: admin123');
+    }
+  };
+
+  return (
+    <div className="max-w-md mx-auto mt-20 bg-white rounded-xl shadow-lg border border-slate-100 overflow-hidden animate-fade-in-up">
+      <div className="bg-slate-800 p-6 text-center">
+        <Lock size={48} className="mx-auto text-indigo-400 mb-3" />
+        <h2 className="text-2xl font-bold text-white">Admin Secure Login</h2>
+      </div>
+      
+      <form onSubmit={handleSubmit} className="p-8 space-y-6">
+        {error && (
+          <div className="bg-red-50 text-red-700 p-3 rounded-md text-sm border border-red-200">
+            {error}
+          </div>
+        )}
+        
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-2">Admin Password</label>
+          <input 
+            type="password" 
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="w-full border border-slate-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            placeholder="Enter password..."
+            required
+          />
+          <p className="text-xs text-slate-400 mt-2">Demo Password: admin123</p>
+        </div>
+        
+        <button 
+          type="submit"
+          className="w-full bg-indigo-600 text-white rounded-lg py-3 font-semibold hover:bg-indigo-700 transition"
+        >
+          Access Dashboard
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function AdminDashboard({ user, onLogout, notify }) {
+  const [questions, setQuestions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  
+  // Form State
+  const [questionText, setQuestionText] = useState('');
+  const [optionA, setOptionA] = useState('');
+  const [optionB, setOptionB] = useState('');
+  const [optionC, setOptionC] = useState('');
+  const [optionD, setOptionD] = useState('');
+  const [correctOption, setCorrectOption] = useState('0'); // Index 0-3
+  const [category, setCategory] = useState(CATEGORIES[0]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    const qRef = collection(db, 'artifacts', appId, 'public', 'data', 'questions');
+    const unsubscribe = onSnapshot(qRef, (snapshot) => {
+      const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      // Sort by creation time descending in memory
+      items.sort((a, b) => b.createdAt - a.createdAt);
+      setQuestions(items);
+      setLoading(false);
+    }, (error) => {
+      console.error("Firestore Error:", error);
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  const handleAddQuestion = async (e) => {
+    e.preventDefault();
+    if (!questionText || !optionA || !optionB || !optionC || !optionD) return;
+    
+    setIsSubmitting(true);
+    try {
+      const qRef = collection(db, 'artifacts', appId, 'public', 'data', 'questions');
+      await addDoc(qRef, {
+        question: questionText,
+        options: [optionA, optionB, optionC, optionD],
+        correctAnswer: parseInt(correctOption, 10),
+        category: category,
+        createdAt: Date.now(),
+        addedBy: user.uid
+      });
+      
+      // Reset form
+      setQuestionText('');
+      setOptionA('');
+      setOptionB('');
+      setOptionC('');
+      setOptionD('');
+      setCorrectOption('0');
+      notify('Question added successfully!');
+    } catch (error) {
+      console.error("Error adding doc:", error);
+    }
+    setIsSubmitting(false);
+  };
+
+  const handleDelete = async (id) => {
+    // We cannot use confirm() due to environment constraints, 
+    // but in a real admin panel we would use a custom modal here. 
+    // For now, straight delete.
+    try {
+      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'questions', id));
+      notify('Question deleted successfully.');
+    } catch (error) {
+      console.error("Delete error:", error);
+    }
+  };
+
+  return (
+    <div className="space-y-8 animate-fade-in">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+        <div>
+          <h2 className="text-3xl font-bold text-slate-800">Admin Dashboard</h2>
+          <p className="text-slate-500 mt-1">Manage Questions and Exams</p>
+        </div>
+        <button 
+          onClick={onLogout}
+          className="mt-4 sm:mt-0 flex items-center space-x-2 bg-slate-100 text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-200 transition"
+        >
+          <LogOut size={18} />
+          <span>Logout</span>
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        
+        {/* Add Question Form */}
+        <div className="lg:col-span-1 bg-white p-6 rounded-xl shadow-sm border border-slate-200 h-fit">
+          <h3 className="text-xl font-bold text-slate-800 mb-6 flex items-center">
+            <PlusCircle size={22} className="text-indigo-600 mr-2" />
+            Add New Question
+          </h3>
+          
+          <form onSubmit={handleAddQuestion} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Category</label>
+              <select 
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-slate-50"
+              >
+                {CATEGORIES.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+              </select>
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Question Text</label>
+              <textarea 
+                value={questionText}
+                onChange={(e) => setQuestionText(e.target.value)}
+                rows={3}
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                placeholder="Enter the MCQ question..."
+                required
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-slate-700">Options</label>
+              <input type="text" value={optionA} onChange={(e) => setOptionA(e.target.value)} placeholder="Option A" required className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none" />
+              <input type="text" value={optionB} onChange={(e) => setOptionB(e.target.value)} placeholder="Option B" required className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none" />
+              <input type="text" value={optionC} onChange={(e) => setOptionC(e.target.value)} placeholder="Option C" required className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none" />
+              <input type="text" value={optionD} onChange={(e) => setOptionD(e.target.value)} placeholder="Option D" required className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none" />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Correct Answer</label>
+              <select 
+                value={correctOption}
+                onChange={(e) => setCorrectOption(e.target.value)}
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-green-50 font-medium text-green-800 border-green-200"
+              >
+                <option value="0">Option A</option>
+                <option value="1">Option B</option>
+                <option value="2">Option C</option>
+                <option value="3">Option D</option>
+              </select>
+            </div>
+
+            <button 
+              type="submit" 
+              disabled={isSubmitting}
+              className={`w-full py-3 rounded-lg font-bold text-white transition mt-4 ${isSubmitting ? 'bg-indigo-400' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+            >
+              {isSubmitting ? 'Saving...' : 'Save Question'}
+            </button>
+          </form>
+        </div>
+
+        {/* Questions List */}
+        <div className="lg:col-span-2 space-y-4">
+          <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex justify-between items-center">
+            <h3 className="text-xl font-bold text-slate-800">Saved Questions ({questions.length})</h3>
+          </div>
+
+          {loading ? (
+            <div className="text-center py-10 text-slate-500">Loading data...</div>
+          ) : questions.length === 0 ? (
+            <div className="bg-white p-10 rounded-xl shadow-sm border border-slate-200 text-center text-slate-500">
+              No questions added yet. Start by adding one from the left panel.
+            </div>
+          ) : (
+            <div className="space-y-4 max-h-[800px] overflow-y-auto pr-2">
+              {questions.map((q) => (
+                <div key={q.id} className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 relative group">
+                  <div className="flex justify-between items-start mb-2">
+                    <span className="bg-indigo-100 text-indigo-800 text-xs px-2 py-1 rounded font-semibold">
+                      {q.category}
+                    </span>
+                    <button 
+                      onClick={() => handleDelete(q.id)}
+                      className="text-slate-400 hover:text-red-500 transition-colors p-1"
+                      title="Delete Question"
+                    >
+                      <Trash2 size={20} />
+                    </button>
+                  </div>
+                  
+                  <p className="font-semibold text-slate-800 mb-3">{q.question}</p>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                    {q.options.map((opt, idx) => (
+                      <div 
+                        key={idx} 
+                        className={`p-2 border rounded ${q.correctAnswer === idx ? 'border-green-400 bg-green-50 text-green-800 font-medium' : 'border-slate-100 bg-slate-50 text-slate-600'}`}
+                      >
+                        <span className="font-bold mr-2">{String.fromCharCode(65 + idx)}.</span>
+                        {opt}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+      </div>
+    </div>
+  );
+}
